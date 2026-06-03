@@ -2,10 +2,29 @@
 	"name": "@baileys-li/eslint-plugin",
 	"version": "0.1.0",
 	"description": "Opinionated ESLint rules for TypeScript and Node.js code style",
+	"keywords": [
+		"arrow-functions",
+		"code-style",
+		"eslint",
+		"eslint-plugin",
+		"eslintplugin",
+		"function-declaration",
+		"typescript"
+	],
+	"homepage": "https://github.com/baileys-li/code-style/tree/main/packages/eslint-plugin#readme",
+	"bugs": "https://github.com/baileys-li/code-style/issues",
+	"license": "MIT",
+	"author": "Arthur Baileys Li <arthurlitovko@gmail.com>",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/baileys-li/code-style.git",
+		"directory": "packages/eslint-plugin"
+	},
 	"files": [
 		"dist"
 	],
 	"type": "module",
+	"sideEffects": false,
 	"exports": {
 		".": {
 			"import": {
@@ -35,5 +54,8 @@
 	},
 	"peerDependencies": {
 		"eslint": ">=9.0.0"
+	},
+	"engines": {
+		"node": ">=20"
 	}
 }
