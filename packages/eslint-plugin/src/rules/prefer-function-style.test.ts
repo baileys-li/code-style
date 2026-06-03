@@ -31,6 +31,21 @@ test('prefer-function-style', () => {
 			// Inner arrow captures `this` from outer scope — outer is still unsafe to move.
 			'const foo = () => { const inner = () => { this.x = 1; }; return inner; }',
 
+			// ── `arguments` / `new.target` — not available inside arrows ──────────────
+
+			'const foo = function() { return arguments[0]; }',
+			'arr.map(function() { return arguments.length; })',
+			'foo = function() { return new.target; }',
+			// `obj.arguments` is just a property name, not the `arguments` object…
+			// but a member access alone is not enough reason to keep the function form,
+			// so this still converts (see invalid cases).
+
+			// ── Self-referential named function expressions ──────────────────────────
+			// The internal name is the only handle on the function; dropping it breaks recursion.
+
+			'const fact = function f(n) { return n <= 1 ? 1 : n * f(n - 1); }',
+			'arr.map(function self(x) { return x <= 0 ? x : self(x - 1); })',
+
 			// ── Positions where FunctionExpression cannot become an arrow ────────────
 
 			// Object properties — left to `object-shorthand` rule.
@@ -190,6 +205,12 @@ test('prefer-function-style', () => {
 				code: 'arr.map(function(x) { return x * 2; })',
 				errors: [{ messageId: 'preferArrowFunction' }],
 				output: 'arr.map((x) => { return x * 2; })',
+			},
+			// `x.arguments` is a property name, not the `arguments` object — safe to convert.
+			{
+				code: 'arr.map(function(x) { return x.arguments; })',
+				errors: [{ messageId: 'preferArrowFunction' }],
+				output: 'arr.map((x) => { return x.arguments; })',
 			},
 			{
 				code: 'promise.then(function() { doSomething(); })',
