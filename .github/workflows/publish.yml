@@ -1,0 +1,36 @@
+name: Publish
+
+# Tag format: <package-dir>@v<version>, e.g. eslint-plugin@v0.1.0
+# The package to publish is derived from the tag, so this one workflow
+# serves every package under the @baileys-li scope — no per-package copies.
+on:
+  push:
+    tags:
+      - "*@v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for npm provenance
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: jdx/mise-action@v4 # installs node + pnpm from mise.toml
+
+      - name: Resolve package name from tag
+        run: echo "PKG=@baileys-li/${GITHUB_REF_NAME%@*}" >> "$GITHUB_ENV"
+
+      - run: pnpm install --frozen-lockfile
+
+      # Build + test the tagged package and its workspace dependencies.
+      - run: pnpm --filter "${PKG}..." build
+      - run: pnpm --filter "${PKG}..." test
+
+      - name: Publish to npm
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" >> ~/.npmrc
+          pnpm --filter "${PKG}" publish --no-git-checks --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
