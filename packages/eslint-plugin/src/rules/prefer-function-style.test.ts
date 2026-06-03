@@ -13,11 +13,10 @@ test('prefer-function-style', () => {
 		valid: [
 			// ── Already correct style ────────────────────────────────────────────────
 
-			// Function declarations are the target form for named bindings.
-			'function foo() {}',
+			'function foo() { doA(); doB(); }',
 			'async function foo() { await bar(); }',
 
-			// Concise arrows are the target form for implicit-return expressions.
+			// Concise arrows are the target for single-return expressions.
 			'const foo = () => value',
 			'const foo = (x) => x + 1',
 			'const foo = (x) => ({ a: x })',
@@ -29,28 +28,28 @@ test('prefer-function-style', () => {
 			'const foo = function() { return this.x; }',
 			'foo = function() { return this.x; }',
 			'arr.map(function() { return this.x; })',
-			// `this` captured through inner arrow still belongs to the outer scope.
+			// Inner arrow captures `this` from outer scope — outer is still unsafe to move.
 			'const foo = () => { const inner = () => { this.x = 1; }; return inner; }',
 
 			// ── Positions where FunctionExpression cannot become an arrow ────────────
 
-			// Method shorthands: replacing the FunctionExpression would be a syntax error.
+			// Object properties — left to `object-shorthand` rule.
+			'const obj = { handler: function() { return 1; } }',
 			'const obj = { method() { return 1; } }',
+
+			// Class methods — replacing with an arrow would be a syntax error.
 			'class Foo { bar() { return 1; } }',
 			'class Foo { static bar() { return 1; } }',
 
-			// Generators cannot be expressed as arrows.
+			// Generators in non-declaration positions can't become arrows.
 			'foo = function*() { yield 1; }',
 			'arr.map(function*() { yield 1; })',
-			// Generator in a named declaration CAN become a function declaration (invalid section).
 
 			// ── `var` and reassigned `let` edge cases ────────────────────────────────
 
-			// `var` is always skipped — function-scoped hoisting differs from
-			// block-scoped `function` declaration in strict mode.
 			'var foo = () => { return 1; }',
 
-			// Reassigned `let` with non-function-expression init — nothing to convert.
+			// Reassigned `let` with arrow init — arrow is already correct, nothing to do.
 			'let foo = () => { return 1; }; foo = other;',
 
 			// Multiple declarators — can't cleanly replace with a single declaration.
@@ -58,33 +57,69 @@ test('prefer-function-style', () => {
 		],
 
 		invalid: [
-			// ── Named bindings → function declaration ────────────────────────────────
+			// ── Single-return named binding → concise arrow ─────────────────────────
+			// (body is exactly `{ return <expr>; }` — no reason to use block syntax)
 
 			{
 				code: 'const foo = () => { return value; }',
-				errors: [{ messageId: 'preferFunctionDeclaration' }],
-				output: 'function foo() { return value; }',
+				errors: [{ messageId: 'preferConciseArrow' }],
+				output: 'const foo = () => value',
 			},
 			{
 				code: 'const foo = function() { return value; }',
-				errors: [{ messageId: 'preferFunctionDeclaration' }],
-				output: 'function foo() { return value; }',
-			},
-			// Internal name of named function expression is dropped.
-			{
-				code: 'const foo = function bar() { return 1; }',
-				errors: [{ messageId: 'preferFunctionDeclaration' }],
-				output: 'function foo() { return 1; }',
+				errors: [{ messageId: 'preferConciseArrow' }],
+				output: 'const foo = () => value',
 			},
 			{
-				code: 'const foo = async () => { await something(); }',
-				errors: [{ messageId: 'preferFunctionDeclaration' }],
-				output: 'async function foo() { await something(); }',
+				code: 'const foo = async () => { return await something(); }',
+				errors: [{ messageId: 'preferConciseArrow' }],
+				output: 'const foo = async () => await something()',
+			},
+			// Object literal return must be wrapped to avoid `{` being parsed as a block.
+			{
+				code: 'const foo = () => { return { a: 1 }; }',
+				errors: [{ messageId: 'preferConciseArrow' }],
+				output: 'const foo = () => ({ a: 1 })',
+			},
+			// export — only the function node is replaced, export keyword is preserved.
+			{
+				code: 'export const foo = () => { return 1; }',
+				errors: [{ messageId: 'preferConciseArrow' }],
+				output: 'export const foo = () => 1',
+			},
+			// `let` with no reassignment — same treatment as `const`.
+			{
+				code: 'let foo = () => { return 1; }',
+				errors: [{ messageId: 'preferConciseArrow' }],
+				output: 'let foo = () => 1',
 			},
 			{
-				code: 'const foo = async function() { await something(); }',
+				code: 'let foo = function() { return 1; }',
+				errors: [{ messageId: 'preferConciseArrow' }],
+				output: 'let foo = () => 1',
+			},
+
+			// ── Multi-statement named binding → function declaration ─────────────────
+
+			{
+				code: 'const foo = () => { doA(); return value; }',
 				errors: [{ messageId: 'preferFunctionDeclaration' }],
-				output: 'async function foo() { await something(); }',
+				output: 'function foo() { doA(); return value; }',
+			},
+			{
+				code: 'const foo = () => { doSomething(); }',
+				errors: [{ messageId: 'preferFunctionDeclaration' }],
+				output: 'function foo() { doSomething(); }',
+			},
+			{
+				code: 'const foo = function() { doA(); doB(); }',
+				errors: [{ messageId: 'preferFunctionDeclaration' }],
+				output: 'function foo() { doA(); doB(); }',
+			},
+			{
+				code: 'const foo = async function() { await doA(); await doB(); }',
+				errors: [{ messageId: 'preferFunctionDeclaration' }],
+				output: 'async function foo() { await doA(); await doB(); }',
 			},
 			// Generators stay generators — only the form changes.
 			{
@@ -93,47 +128,42 @@ test('prefer-function-style', () => {
 				output: 'function* foo() { yield 1; }',
 			},
 			{
-				code: 'const foo = x => { return x; }',
+				code: 'const foo = (a, b) => { doA(); return a + b; }',
 				errors: [{ messageId: 'preferFunctionDeclaration' }],
-				output: 'function foo(x) { return x; }',
+				output: 'function foo(a, b) { doA(); return a + b; }',
 			},
+			// Internal name of named function expression is dropped.
 			{
-				code: 'const foo = (a, b) => { return a + b; }',
+				code: 'const foo = function bar() { doSomething(); }',
 				errors: [{ messageId: 'preferFunctionDeclaration' }],
-				output: 'function foo(a, b) { return a + b; }',
+				output: 'function foo() { doSomething(); }',
 			},
-			// `this` inside a nested FunctionExpression belongs to that inner function —
-			// the outer arrow is safe to promote.
+			// `this` only inside an inner FunctionExpression — outer arrow is safe to promote.
 			{
 				code: 'const foo = () => { const cb = function() { this.x = 1; }; return cb; }',
 				errors: [{ messageId: 'preferFunctionDeclaration' }],
 				output: 'function foo() { const cb = function() { this.x = 1; }; return cb; }',
 			},
+			// export multi-statement → export function declaration.
 			{
-				code: 'export const foo = () => { return 1; }',
+				code: 'export const foo = () => { doSomething(); return 1; }',
 				errors: [{ messageId: 'preferFunctionDeclaration' }],
-				output: 'export function foo() { return 1; }',
+				output: 'export function foo() { doSomething(); return 1; }',
 			},
 			{
-				code: 'export const foo = function() { return 1; }',
+				code: 'export const foo = function() { doA(); doB(); }',
 				errors: [{ messageId: 'preferFunctionDeclaration' }],
-				output: 'export function foo() { return 1; }',
+				output: 'export function foo() { doA(); doB(); }',
 			},
-			// `let` with no reassignment — treated the same as `const`.
+			// `let` multi-statement with no reassignment — same as `const`.
 			{
-				code: 'let foo = () => { return 1; }',
+				code: 'let foo = () => { doA(); return 1; }',
 				errors: [{ messageId: 'preferFunctionDeclaration' }],
-				output: 'function foo() { return 1; }',
-			},
-			{
-				code: 'let foo = function() { return 1; }',
-				errors: [{ messageId: 'preferFunctionDeclaration' }],
-				output: 'function foo() { return 1; }',
+				output: 'function foo() { doA(); return 1; }',
 			},
 
 			// ── Anonymous function expressions → arrow ────────────────────────────────
 
-			// Assignment.
 			{
 				code: 'foo = function() { return 1; }',
 				errors: [{ messageId: 'preferArrowFunction' }],
@@ -150,7 +180,6 @@ test('prefer-function-style', () => {
 				errors: [{ messageId: 'preferArrowFunction' }],
 				output: 'let foo = () => { return 1; }; foo = other;',
 			},
-			// Both the init arrow and the reassignment function expression.
 			{
 				code: 'let foo = () => { return 1; }; foo = function() { return 2; };',
 				errors: [{ messageId: 'preferArrowFunction' }],
@@ -171,12 +200,6 @@ test('prefer-function-style', () => {
 				code: 'setTimeout(function() { run(); }, 1000)',
 				errors: [{ messageId: 'preferArrowFunction' }],
 				output: 'setTimeout(() => { run(); }, 1000)',
-			},
-			// Object property value (not a method shorthand).
-			{
-				code: 'const obj = { handler: function() { return 1; } }',
-				errors: [{ messageId: 'preferArrowFunction' }],
-				output: 'const obj = { handler: () => { return 1; } }',
 			},
 		],
 	})
