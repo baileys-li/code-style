@@ -8,8 +8,8 @@ const tester = new RuleTester({
 	languageOptions: { ecmaVersion: 2022, sourceType: 'module' },
 })
 
-test('prefer-function-style', () => {
-	tester.run('prefer-function-style', rule, {
+test('readable-function', () => {
+	tester.run('readable-function', rule, {
 		valid: [
 			// ── Already correct style ────────────────────────────────────────────────
 
@@ -213,6 +213,41 @@ test('prefer-function-style', () => {
 				code: 'let foo = () => { doA(); return 1; }',
 				errors: [{ messageId: 'preferFunctionDeclaration' }],
 				output: 'function foo() { doA(); return 1; }',
+			},
+
+			// ── allowUnsafeFixes: false — promotion becomes a manual suggestion ──────
+			// The hoisting change is no longer auto-applied; it is offered as a suggestion.
+			{
+				code: 'const foo = () => { doA(); doB(); }',
+				options: [{ allowUnsafeFixes: false }],
+				output: null,
+				errors: [
+					{
+						messageId: 'preferFunctionDeclaration',
+						suggestions: [
+							{
+								messageId: 'convertToFunctionDeclaration',
+								output: 'function foo() { doA(); doB(); }',
+							},
+						],
+					},
+				],
+			},
+			{
+				code: 'export const foo = function() { doA(); doB(); }',
+				options: [{ allowUnsafeFixes: false }],
+				output: null,
+				errors: [
+					{
+						messageId: 'preferFunctionDeclaration',
+						suggestions: [
+							{
+								messageId: 'convertToFunctionDeclaration',
+								output: 'export function foo() { doA(); doB(); }',
+							},
+						],
+					},
+				],
 			},
 
 			// ── Anonymous function expressions → arrow ────────────────────────────────
