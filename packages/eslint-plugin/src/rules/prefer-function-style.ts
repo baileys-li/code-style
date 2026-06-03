@@ -27,7 +27,7 @@ function containsThis(node: unknown): boolean {
 		// `parent` is a back-reference added by ESLint — skip to avoid cycles.
 		if (key === 'parent') continue
 		if (Array.isArray(value)) {
-			if (value.some(item => containsThis(item))) return true
+			if (value.some((item) => containsThis(item))) return true
 		} else if (value && typeof value === 'object' && 'type' in (value as object)) {
 			if (containsThis(value)) return true
 		}
@@ -72,23 +72,60 @@ const rule: Rule.RuleModule = {
 		fixable: 'code',
 		schema: [],
 		messages: {
-			preferFunctionDeclaration: 'Prefer a function declaration. Use an arrow function only for concise implicit-return expressions.',
+			preferFunctionDeclaration:
+				'Prefer a function declaration. Use an arrow function only for concise implicit-return expressions.',
+			preferArrowFunction: 'Prefer an arrow function for an anonymous function expression.',
 		},
 		docs: {
-			description: 'Enforce function declarations for block-body functions; allow arrows only for implicit-return expressions.',
+			description:
+				'Enforce function declarations for named block-body functions; arrow functions for anonymous function expressions.',
 		},
 	},
 
 	create(context) {
 		const { sourceCode } = context
 
+		/** Reports a FunctionExpression and fixes it to an arrow function. */
+		function reportAsArrow(fn: FunctionExpression): void {
+			// Generators cannot be expressed as arrows.
+			if (fn.generator || containsThis(fn.body)) return
+
+			context.report({
+				node: fn as Rule.Node,
+				messageId: 'preferArrowFunction',
+				fix(fixer) {
+					const asyncKw = fn.async ? 'async ' : ''
+					const paramsText = extractParamsText(fn, sourceCode)
+					const bodyText = sourceCode.getText(fn.body as Rule.Node)
+					return fixer.replaceText(fn as Rule.Node, `${asyncKw}${paramsText} => ${bodyText}`)
+				},
+			})
+		}
+
 		return {
-			VariableDeclaration(varDecl: VariableDeclaration & Rule.NodeParentExtension) {
-				// Only target `const` — `let`/`var` imply intentional reassignability.
-				if (varDecl.kind !== 'const' || varDecl.declarations.length !== 1) return
+			VariableDeclaration(varDecl) {
+				const { kind } = varDecl
+
+				// `var` is excluded: its function-scoped hoisting diverges from the
+				// block-scoped `function` declaration semantics in strict mode (ESM).
+				if (kind === 'var' || varDecl.declarations.length !== 1) return
 
 				const [declarator] = varDecl.declarations
 				if (declarator.id.type !== 'Identifier' || !declarator.init) return
+
+				if (kind === 'let') {
+					const [variable] = sourceCode.getDeclaredVariables(varDecl)
+					const isReassigned = variable?.references.some((ref) => ref.isWrite() && !ref.init)
+
+					if (isReassigned) {
+						// Can't promote to a function declaration, but a FunctionExpression
+						// init can still become an arrow for consistency.
+						if (declarator.init.type === 'FunctionExpression') {
+							reportAsArrow(declarator.init as FunctionExpression)
+						}
+						return
+					}
+				}
 
 				const fn = declarator.init
 				const isBlockArrow = fn.type === 'ArrowFunctionExpression' && fn.body.type === 'BlockStatement'
@@ -109,8 +146,13 @@ const rule: Rule.RuleModule = {
 
 						// TypeScript-specific nodes are present when @typescript-eslint/parser is used.
 						const typeParams =
-							'typeParameters' in fnNode && fnNode.typeParameters ? sourceCode.getText(fnNode.typeParameters as Rule.Node) : ''
-						const returnType = 'returnType' in fnNode && fnNode.returnType ? sourceCode.getText(fnNode.returnType as Rule.Node) : ''
+							'typeParameters' in fnNode && fnNode.typeParameters
+								? sourceCode.getText(fnNode.typeParameters as Rule.Node)
+								: ''
+						const returnType =
+							'returnType' in fnNode && fnNode.returnType
+								? sourceCode.getText(fnNode.returnType as Rule.Node)
+								: ''
 
 						const paramsText = extractParamsText(fnNode, sourceCode)
 						const bodyText = sourceCode.getText(fnNode.body as Rule.Node)
@@ -126,6 +168,13 @@ const rule: Rule.RuleModule = {
 						return fixer.replaceText(varDecl as Rule.Node, fnDecl)
 					},
 				})
+			},
+
+			// `foo = function() {}` → `foo = () => {}`
+			AssignmentExpression(node) {
+				if (node.right.type === 'FunctionExpression') {
+					reportAsArrow(node.right as FunctionExpression)
+				}
 			},
 		}
 	},
