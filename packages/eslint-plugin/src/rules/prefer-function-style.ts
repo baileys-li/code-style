@@ -1,7 +1,5 @@
 import type { Rule } from 'eslint'
-import type { ArrowFunctionExpression, FunctionExpression, Identifier, VariableDeclaration } from 'estree'
-
-type FnNode = ArrowFunctionExpression | FunctionExpression
+import type { FunctionExpression, Identifier, VariableDeclaration } from 'estree'
 
 /**
  * Walks the AST looking for `this`, but does not descend into non-arrow
@@ -40,15 +38,13 @@ function containsThis(node: unknown): boolean {
  * Returns the params text including surrounding parens.
  * Handles single-param arrows without parens: `x => {}` → `(x)`.
  */
-function extractParamsText(fn: FnNode, sourceCode: Rule.RuleContext['sourceCode']): string {
+function extractParamsText(fn: FunctionExpression, sourceCode: Rule.RuleContext['sourceCode']): string {
 	if (fn.params.length === 0) return '()'
 
 	const fullSrc = sourceCode.getText()
 	const firstParam = fn.params[0] as Rule.Node
 	const lastParam = fn.params[fn.params.length - 1] as Rule.Node
 
-	// ArrowFunctionExpression with a single bare param (`x => {}`) starts at
-	// the param itself, so fnStart === firstParam start — there's no `(`.
 	const fnStart = (fn as unknown as Rule.Node).range![0]
 	let open = firstParam.range![0] - 1
 	// Allow open === fnStart: when the function starts with `(`, fnStart is the
@@ -78,16 +74,16 @@ const rule: Rule.RuleModule = {
 		},
 		docs: {
 			description:
-				'Enforce function declarations for named block-body functions; arrow functions for anonymous function expressions.',
+				'Enforce function declarations for named bindings; arrow functions for anonymous function expressions.',
 		},
 	},
 
 	create(context) {
 		const { sourceCode } = context
 
-		/** Reports a FunctionExpression and fixes it to an arrow function. */
+		/** Converts a FunctionExpression to an arrow function in-place. */
 		function reportAsArrow(fn: FunctionExpression): void {
-			// Generators cannot be expressed as arrows.
+			// Generators cannot be expressed as arrow functions.
 			if (fn.generator || containsThis(fn.body)) return
 
 			context.report({
@@ -103,6 +99,8 @@ const rule: Rule.RuleModule = {
 		}
 
 		return {
+			// ── Named bindings: prefer function declaration ─────────────────────────
+
 			VariableDeclaration(varDecl) {
 				const { kind } = varDecl
 
@@ -131,31 +129,26 @@ const rule: Rule.RuleModule = {
 				const isBlockArrow = fn.type === 'ArrowFunctionExpression' && fn.body.type === 'BlockStatement'
 
 				if (!isBlockArrow && fn.type !== 'FunctionExpression') return
-
-				// Changing arrow ↔ declaration affects `this` binding — skip.
 				if (containsThis(fn.body)) return
 
 				context.report({
 					node: fn as Rule.Node,
 					messageId: 'preferFunctionDeclaration',
 					fix(fixer) {
-						const fnNode = fn as FnNode
 						const name = (declarator.id as Identifier).name
-						const asyncKw = fnNode.async ? 'async ' : ''
-						const generatorMark = fnNode.type === 'FunctionExpression' && fnNode.generator ? '*' : ''
+						const asyncKw = fn.async ? 'async ' : ''
+						const generatorMark = fn.type === 'FunctionExpression' && fn.generator ? '*' : ''
 
 						// TypeScript-specific nodes are present when @typescript-eslint/parser is used.
 						const typeParams =
-							'typeParameters' in fnNode && fnNode.typeParameters
-								? sourceCode.getText(fnNode.typeParameters as Rule.Node)
+							'typeParameters' in fn && fn.typeParameters
+								? sourceCode.getText(fn.typeParameters as Rule.Node)
 								: ''
 						const returnType =
-							'returnType' in fnNode && fnNode.returnType
-								? sourceCode.getText(fnNode.returnType as Rule.Node)
-								: ''
+							'returnType' in fn && fn.returnType ? sourceCode.getText(fn.returnType as Rule.Node) : ''
 
-						const paramsText = extractParamsText(fnNode, sourceCode)
-						const bodyText = sourceCode.getText(fnNode.body as Rule.Node)
+						const paramsText = extractParamsText(fn as FunctionExpression, sourceCode)
+						const bodyText = sourceCode.getText(fn.body as Rule.Node)
 
 						const fnDecl = `${asyncKw}function${generatorMark} ${name}${typeParams}${paramsText}${returnType} ${bodyText}`
 
@@ -170,11 +163,26 @@ const rule: Rule.RuleModule = {
 				})
 			},
 
-			// `foo = function() {}` → `foo = () => {}`
-			AssignmentExpression(node) {
-				if (node.right.type === 'FunctionExpression') {
-					reportAsArrow(node.right as FunctionExpression)
+			// ── Anonymous function expressions: prefer arrow ────────────────────────
+
+			FunctionExpression(fn) {
+				const parent = (fn as unknown as Rule.Node).parent
+
+				// Method shorthands (`{ foo() {} }`) and class methods use FunctionExpression
+				// internally, but replacing them with an arrow would be a syntax error.
+				if (parent?.type === 'MethodDefinition') return
+				if (parent?.type === 'Property' && (parent as unknown as { method: boolean }).method) return
+
+				// Named `const`/`let` declarations are handled by the VariableDeclaration
+				// visitor above (function declaration promotion or reassigned-let arrow).
+				if (
+					parent?.type === 'VariableDeclarator' &&
+					(parent as Rule.Node & { id?: { type: string } }).id?.type === 'Identifier'
+				) {
+					return
 				}
+
+				reportAsArrow(fn)
 			},
 		}
 	},
