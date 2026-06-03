@@ -2,7 +2,7 @@ import { test } from 'node:test'
 
 import { RuleTester } from 'eslint'
 
-import rule from './prefer-function-style.js'
+import rule from './readable-function.js'
 
 const tester = new RuleTester({
 	languageOptions: { ecmaVersion: 2022, sourceType: 'module' },
@@ -22,18 +22,23 @@ test('prefer-function-style', () => {
 			'const foo = (x) => ({ a: x })',
 			'arr.map((x) => x * 2)',
 
-			// ── `this` usage — style change would affect binding ─────────────────────
+			// ── `this` usage ─────────────────────────────────────────────────────────
+			// Converting a regular function to an arrow changes `this` binding; the
+			// reverse is also true. Conversions that keep the same function form are safe.
 
+			// Arrow → function declaration: `this` is currently lexical; a fn declaration
+			// would make it dynamic — skip.
 			'const foo = () => { this.x = 1; }',
-			'const foo = function() { return this.x; }',
+			// Anonymous regular function → arrow: `this` would become lexical — skip.
 			'foo = function() { return this.x; }',
 			'arr.map(function() { return this.x; })',
-			// Inner arrow captures `this` from outer scope — outer is still unsafe to move.
+			// Inner arrow captures `this` from outer scope — outer arrow still unsafe to
+			// promote to a function declaration (this binding would change).
 			'const foo = () => { const inner = () => { this.x = 1; }; return inner; }',
 
 			// ── `arguments` / `new.target` — not available inside arrows ──────────────
-
-			'const foo = function() { return arguments[0]; }',
+			// Anonymous regular function → arrow: `arguments` / `new.target` would
+			// resolve differently — skip.
 			'arr.map(function() { return arguments.length; })',
 			'foo = function() { return new.target; }',
 			// `obj.arguments` is just a property name, not the `arguments` object…
@@ -72,6 +77,36 @@ test('prefer-function-style', () => {
 		],
 
 		invalid: [
+			// ── `this` / binding-aware conversions ─────────────────────────────────
+			// FunctionExpression → function declaration: same binding form, always safe.
+
+			// Single-return FunctionExpression with `this`: can't become an arrow (binding
+			// would change), but a function declaration preserves the exact same semantics.
+			{
+				code: 'const foo = function() { return this.x; }',
+				errors: [{ messageId: 'preferFunctionDeclaration' }],
+				output: 'function foo() { return this.x; }',
+			},
+			// Multi-statement FunctionExpression with `this`: same situation.
+			{
+				code: 'const foo = function() { this.x = 1; doSomething(); }',
+				errors: [{ messageId: 'preferFunctionDeclaration' }],
+				output: 'function foo() { this.x = 1; doSomething(); }',
+			},
+			// FunctionExpression with `arguments`: same — declaration preserves it.
+			{
+				code: 'const foo = function() { return arguments[0]; }',
+				errors: [{ messageId: 'preferFunctionDeclaration' }],
+				output: 'function foo() { return arguments[0]; }',
+			},
+			// ArrowFunctionExpression → concise arrow: `this` is already lexical in both
+			// forms — making it concise doesn't change the binding at all.
+			{
+				code: 'const foo = () => { return this.x; }',
+				errors: [{ messageId: 'preferConciseArrow' }],
+				output: 'const foo = () => this.x',
+			},
+
 			// ── Single-return named binding → concise arrow ─────────────────────────
 			// (body is exactly `{ return <expr>; }` — no reason to use block syntax)
 
@@ -153,10 +188,13 @@ test('prefer-function-style', () => {
 				errors: [{ messageId: 'preferFunctionDeclaration' }],
 				output: 'function foo() { doSomething(); }',
 			},
-			// `this` only inside an inner FunctionExpression — outer arrow is safe to promote.
+			// `this` only inside an inner FunctionExpression — both are safe to promote
+			// to function declarations (function→function keeps the same `this` binding).
+			// Fixes conflict (inner is nested inside outer range) so one pass applies only
+			// the outer; a second pass would fix the inner.
 			{
 				code: 'const foo = () => { const cb = function() { this.x = 1; }; return cb; }',
-				errors: [{ messageId: 'preferFunctionDeclaration' }],
+				errors: [{ messageId: 'preferFunctionDeclaration' }, { messageId: 'preferFunctionDeclaration' }],
 				output: 'function foo() { const cb = function() { this.x = 1; }; return cb; }',
 			},
 			// export multi-statement → export function declaration.

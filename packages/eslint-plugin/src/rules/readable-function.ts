@@ -25,7 +25,7 @@ interface TSFunctionAnnotations {
 }
 
 const isNode = (value: unknown): value is Node => typeof value === 'object' && value !== null && 'type' in value
-const findBindingInNodeValue = (value: unknown) => isNode(value) && usesFunctionBinding(value)
+const hasFunctionBinding = (value: unknown) => isNode(value) && usesFunctionBinding(value)
 
 /**
  * True when the subtree relies on a binding a regular function provides but an
@@ -63,14 +63,14 @@ function usesFunctionBinding(node: Node): boolean {
 		const value = node[key as keyof Node]
 
 		if (Array.isArray(value)) {
-			if (value.some(findBindingInNodeValue)) return true
-		} else if (findBindingInNodeValue(value)) return true
+			if (value.some(hasFunctionBinding)) return true
+		} else if (hasFunctionBinding(value)) return true
 	}
 	return false
 }
 
 /** The returned expression when `body` is exactly `{ return <expr>; }`. */
-function singleReturnArgument(body: BlockStatement): Expression | undefined {
+function extractSingleReturnArgument(body: BlockStatement): Expression | undefined {
 	if (body.body.length !== 1) return undefined
 	const [statement] = body.body
 	if (statement.type !== 'ReturnStatement' || !statement.argument) return undefined
@@ -129,7 +129,7 @@ function createReporters(context: Rule.RuleContext) {
 	const { sourceCode } = context
 
 	/** Text of an optional TS annotation (type parameters / return type), or ''. */
-	const annotation = (fn: AnyFunction, key: keyof TSFunctionAnnotations): string => {
+	function getAnnotationText(fn: AnyFunction, key: keyof TSFunctionAnnotations) {
 		const node = (fn as AnyFunction & TSFunctionAnnotations)[key]
 		return node ? sourceCode.getText(node) : ''
 	}
@@ -153,7 +153,7 @@ function createReporters(context: Rule.RuleContext) {
 				node: fn,
 				messageId: 'preferConciseArrow',
 				fix(fixer) {
-					const head = `${fn.async ? 'async ' : ''}${annotation(fn, 'typeParameters')}${paramListText(fn, sourceCode)}${annotation(fn, 'returnType')}`
+					const head = `${fn.async ? 'async ' : ''}${getAnnotationText(fn, 'typeParameters')}${paramListText(fn, sourceCode)}${getAnnotationText(fn, 'returnType')}`
 					const argText = sourceCode.getText(returnArg)
 					// Parenthesise an object literal so `{` is not parsed as a block.
 					const exprText = returnArg.type === 'ObjectExpression' ? `(${argText})` : argText
@@ -170,7 +170,7 @@ function createReporters(context: Rule.RuleContext) {
 				fix(fixer) {
 					const name = (declarator.id as Identifier).name
 					const star = fn.type === 'FunctionExpression' && fn.generator ? '*' : ''
-					const declaration = `${fn.async ? 'async ' : ''}function${star} ${name}${annotation(fn, 'typeParameters')}${paramListText(fn, sourceCode)}${annotation(fn, 'returnType')} ${sourceCode.getText(fn.body)}`
+					const declaration = `${fn.async ? 'async ' : ''}function${star} ${name}${getAnnotationText(fn, 'typeParameters')}${paramListText(fn, sourceCode)}${getAnnotationText(fn, 'returnType')} ${sourceCode.getText(fn.body)}`
 
 					// Replace the whole `export const …` so the `export` keyword survives.
 					if (varDecl.parent.type === 'ExportNamedDeclaration') {
@@ -185,13 +185,12 @@ function createReporters(context: Rule.RuleContext) {
 
 const rule: Rule.RuleModule = {
 	meta,
-
 	create(context) {
 		const { sourceCode } = context
 		const report = createReporters(context)
 
 		return {
-			VariableDeclaration(varDecl: WithParent<VariableDeclaration>) {
+			VariableDeclaration(varDecl) {
 				// `var` is excluded: its function-scoped hoisting diverges from the
 				// block-scoped `function` declaration semantics in strict mode (ESM).
 				if (varDecl.kind === 'var' || varDecl.declarations.length !== 1) return
@@ -213,19 +212,32 @@ const rule: Rule.RuleModule = {
 
 				const fn = init
 				const body = fn.body as BlockStatement
-				if (usesFunctionBinding(body) || isSelfReferenced(fn, sourceCode)) return
+				if (isSelfReferenced(fn, sourceCode)) return
 
-				const returnArg = singleReturnArgument(body)
+				const returnArg = extractSingleReturnArgument(body)
 				const isGenerator = fn.type === 'FunctionExpression' && fn.generator
+				const isFunctionExpression = fn.type === 'FunctionExpression'
 
 				if (returnArg && !isGenerator) {
-					report.conciseArrow(fn, returnArg)
-				} else {
+					// Target is an arrow (concise form). Binding changes only when source is a regular
+					// function — arrow→arrow keeps the same lexical this/arguments.
+					if (!isFunctionExpression || !usesFunctionBinding(body)) {
+						report.conciseArrow(fn, returnArg)
+					} else {
+						// FunctionExpression uses this/arguments: can't become an arrow, but a function
+						// declaration preserves the exact same binding.
+						report.functionDeclaration(varDecl, declarator, fn)
+					}
+				} else if (isFunctionExpression || !usesFunctionBinding(body)) {
+					// Target is a function declaration. Binding changes only when source is an arrow.
+					// FunctionExpression → function declaration is always safe.
 					report.functionDeclaration(varDecl, declarator, fn)
 				}
+				// Arrow with this/arguments in multi-statement body: converting to a function
+				// declaration would change the binding — nothing to do.
 			},
 
-			FunctionExpression(fn: WithParent<FunctionExpression>) {
+			FunctionExpression(fn) {
 				const { parent } = fn
 
 				// Class methods — an arrow here would be a syntax error.

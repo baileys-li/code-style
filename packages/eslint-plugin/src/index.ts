@@ -1,9 +1,9 @@
 import type { ESLint, Linter } from 'eslint'
 
-import preferFunctionStyle from './rules/prefer-function-style.js'
+import readableFunctionStyle from './rules/readable-function.js'
 
 const rules = {
-	'prefer-function-style': preferFunctionStyle,
+	'readable-function': readableFunctionStyle,
 } as const
 
 const plugin: ESLint.Plugin = {
@@ -14,7 +14,7 @@ const plugin: ESLint.Plugin = {
 const recommended: Linter.Config = {
 	plugins: { '@baileys-li': plugin },
 	rules: {
-		'@baileys-li/prefer-function-style': 'warn',
+		'@baileys-li/readable-function': 'warn',
 	},
 }
 
