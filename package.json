@@ -1,17 +1,22 @@
 {
-  "name": "@baileys-li/code-style",
-  "version": "0.0.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "build": "pnpm -r build",
-    "test": "pnpm -r test"
-  },
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "^11.4.0",
-      "onFail": "download"
-    }
-  }
+	"name": "@baileys-li/code-style",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "pnpm -r build",
+		"fmt": "oxfmt",
+		"fmt:check": "oxfmt --check",
+		"test": "pnpm -r test"
+	},
+	"devDependencies": {
+		"oxfmt": "^0.53.0"
+	},
+	"devEngines": {
+		"packageManager": {
+			"name": "pnpm",
+			"version": "^11.4.0",
+			"onFail": "download"
+		}
+	}
 }
