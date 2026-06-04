@@ -1,6 +1,6 @@
 {
 	"name": "@baileys-li/eslint-plugin",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "Opinionated ESLint rules for TypeScript and Node.js code style",
 	"keywords": [
 		"arrow-functions",
