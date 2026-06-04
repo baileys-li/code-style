@@ -16,6 +16,9 @@ test('readable-function', () => {
 			'function foo() { doA(); doB(); }',
 			'async function foo() { await bar(); }',
 
+			// FunctionDeclaration with multiple statements — already correct style.
+			'function foo(x) { doSomething(); return x; }',
+
 			// Concise arrows are the target for single-return expressions.
 			'const foo = () => value',
 			'const foo = (x) => x + 1',
@@ -294,6 +297,49 @@ test('readable-function', () => {
 				code: 'setTimeout(function() { run(); }, 1000)',
 				errors: [{ messageId: 'preferArrowFunction' }],
 				output: 'setTimeout(() => { run(); }, 1000)',
+			},
+
+			// ── Function declarations with single return → concise arrow ──────────────
+			// Function declarations that only return an expression are more readable as
+			// concise arrows. This is an unsafe fix (changes hoisting), so it respects
+			// the `allowUnsafeFixes` option.
+
+			{
+				code: 'function stripLeadingIndex(input) { return input.trim(); }',
+				errors: [{ messageId: 'preferConciseArrow' }],
+				output: 'const stripLeadingIndex = (input) => input.trim()',
+			},
+			{
+				code: 'function normalizeCyrillicLookalikes(input) { return input.replace(/А/g, "A"); }',
+				errors: [{ messageId: 'preferConciseArrow' }],
+				output: 'const normalizeCyrillicLookalikes = (input) => input.replace(/А/g, "A")',
+			},
+			{
+				code: 'function hasUnknownRh(input) { return /[Rr][Hh]/.test(input); }',
+				errors: [{ messageId: 'preferConciseArrow' }],
+				output: 'const hasUnknownRh = (input) => /[Rr][Hh]/.test(input)',
+			},
+			{
+				code: 'async function fetchData(url) { return fetch(url).then(r => r.json()); }',
+				errors: [{ messageId: 'preferConciseArrow' }],
+				output: 'const fetchData = async (url) => fetch(url).then(r => r.json())',
+			},
+			// With allowUnsafeFixes: false, the fix becomes a suggestion.
+			{
+				code: 'function foo() { return 42; }',
+				options: [{ allowUnsafeFixes: false }],
+				output: null,
+				errors: [
+					{
+						messageId: 'preferConciseArrow',
+						suggestions: [
+							{
+								messageId: 'convertToConciseArrow',
+								output: 'const foo = () => 42',
+							},
+						],
+					},
+				],
 			},
 		],
 	})

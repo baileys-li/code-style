@@ -3,6 +3,7 @@ import type {
 	ArrowFunctionExpression,
 	BlockStatement,
 	Expression,
+	FunctionDeclaration,
 	FunctionExpression,
 	Identifier,
 	Node,
@@ -260,6 +261,36 @@ function reportFunctionDeclaration(
 	})
 }
 
+/**
+ * `function foo() { return x; }` → `const foo = () => x`
+ *
+ * This changes hoisting semantics (function declarations are hoisted, const is
+ * not), so it respects the `allowUnsafeFixes` option like the reverse conversion.
+ */
+function reportConciseArrowFromFunctionDeclaration(
+	context: Rule.RuleContext,
+	fn: WithParent<FunctionDeclaration>,
+	returnArg: Expression,
+): void {
+	const { sourceCode } = context
+	const { allowUnsafeFixes = true }: Options = context.options[0] ?? {}
+
+	const fix: Rule.ReportFixer = fixer => {
+		const name = fn.id!.name
+		const sig = signatureText(fn as any, sourceCode)
+		const head = `const ${name} = ${fn.async ? 'async ' : ''}${sig}`
+		const argText = sourceCode.getText(returnArg)
+		const exprText = returnArg.type === 'ObjectExpression' ? `(${argText})` : argText
+		return fixer.replaceText(fn, `${head} => ${exprText}`)
+	}
+
+	context.report({
+		node: fn,
+		messageId: 'preferConciseArrow',
+		...(allowUnsafeFixes ? { fix } : { suggest: [{ messageId: 'convertToConciseArrow', fix }] }),
+	})
+}
+
 // ── Rule ───────────────────────────────────────────────────────────────────
 
 const meta: Rule.RuleModule['meta'] = {
@@ -284,6 +315,7 @@ const meta: Rule.RuleModule['meta'] = {
 		preferConciseArrow: 'Use a concise arrow function — the function just returns an expression.',
 		preferArrowFunction: 'Use an arrow function — anonymous functions are shorter as arrows.',
 		convertToFunctionDeclaration: 'Convert to a function declaration (hoists the binding).',
+		convertToConciseArrow: 'Convert to a concise arrow function (unhoists the binding).',
 	},
 	docs: {
 		description:
@@ -317,6 +349,13 @@ const rule: Rule.RuleModule = {
 
 			FunctionExpression(fn) {
 				if (!isHandledElsewhere(fn.parent)) reportArrowFunction(context, fn)
+			},
+
+			FunctionDeclaration(fn) {
+				if (!fn.id) return
+				const returnArg = extractSingleReturnArgument(fn.body)
+				if (!returnArg || fn.generator || usesFunctionBinding(fn.body)) return
+				reportConciseArrowFromFunctionDeclaration(context, fn, returnArg)
 			},
 		}
 	},
